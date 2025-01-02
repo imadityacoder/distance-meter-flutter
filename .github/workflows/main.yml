@@ -1,14 +1,15 @@
 name: "Build"
 
 on:
-  pull_request:
-    branches:
-      - dev
-      - test
-  push:
-    branches:
-      - dev
-      - test
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "production"
+      version:
+        description: "Version to deploy"
+        required: false
 
 jobs:  
   build:      
