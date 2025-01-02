@@ -24,15 +24,20 @@ jobs:
         run: |
           git clone https://github.com/flutter/flutter.git -b stable --depth 1
           echo "$PWD/flutter/bin" >> $GITHUB_PATH
+          export PATH="$PWD/flutter/bin:$PATH"
           flutter --version
 
       # Step 3: Install dependencies
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          export PATH="$PWD/flutter/bin:$PATH"
+          flutter pub get
 
       # Step 4: Build the APK
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          export PATH="$PWD/flutter/bin:$PATH"
+          flutter build apk --release
 
       # Step 5: Upload the APK artifact
       - name: Upload APK Artifact
