@@ -1,78 +1,99 @@
-name: 'Builds - build Flutter APK and create github release'
-description: 'A GitHub Action that builds a Flutter APK'
-author: 'Aditya Kumar'
+name: "Build"
 
-branding:
-  icon: 'maximize'
-  color: 'blue'
+on:
+  pull_request:
+    branches:
+      - dev
+      - test
+  push:
+    branches:
+      - dev
+      - test
 
-inputs:
-  matrix-target:
-    description: 'The build target to use'
-    required: true
-    default: 'apk --split-per-abi'
-    # Map the "matrix.target" variable to the "matrix-target" input.
-    # Use the ${{ inputs.matrix-target }} syntax to access the value in the workflow.
-    # Use the "default" property to set a default value if the input is not provided.
-    # Use the "required" property to make the input mandatory.
+jobs:  
+  build:      
+    name: Build & Release 
+    runs-on: macos-latest 
 
-runs:
-  using: 'docker'
-  image: 'Dockerfile'
-  # Use Docker to run the action.
-  # Specify the path to a Dockerfile that describes the environment for the action.
+    steps:
+        #1 Checkout Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-outputs:
-  built-apk:
-    description: 'The path to the built APK'
-    # Define an output variable for the built APK.
-    # Use the ${{ steps.build.outputs.built-apk }} syntax to access the value in the workflow.
+        #2 Setup Java
+      - name: Set Up Java
+        uses: actions/setup-java@v3.12.0
+        with:
+          distribution: 'oracle'
+          java-version: '17'
 
+        #3 Setup Flutter
+      - name: Set Up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.2'
+          channel: 'stable'
 
-permissions:
-  contents: 'read'
-  # Define the default permissions for the action.
+        #4 Install Dependencies
+      - name: Install Dependencies
+        run: flutter pub get
 
-steps:
-  - name: 'Set up JDK 11'
-    uses: 'actions/setup-java@v1'
-    with:
-      java-version: '11'
-      distribution: 'temurin'
-    # Set up JDK 11 using the "actions/setup-java" action.
+       #6 Building APK
+      - name: Build APK
+        run: flutter build apk --release
 
-  - name: 'Clone Flutter repository with master channel'
-    uses: 'subosito/flutter-action@v1'
-    with:
-      channel: 'master'
-    # Clone the Flutter repository using the "subosito/flutter-action" action.
+        #7 Building App Bundle (aab)
+      - name: Build appBundle
+        run: flutter build appbundle
 
-  - name: 'Configure Flutter for macOS desktop'
-    run: 'flutter config --enable-macos-desktop'
-    # Configure Flutter for macOS desktop.
+        #8 Build IPA ( IOS Build )
+      - name: Build IPA
+        run: flutter build ipa --no-codesign
 
-  - name: 'Check Flutter environment'
-    run: 'flutter doctor -v'
-    # Check the Flutter environment.
+      - name: Compress Archives and IPAs
+        run: |
+          cd build
+          tar -czf ios_build.tar.gz ios
 
-  - name: 'Checkout code'
-    uses: 'actions/checkout@v2'
-    # Checkout the app code using the "actions/checkout" action.
+        #9 Upload Artifacts
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: Releases
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+            build/ios_build.tar.gz
 
-  - name: 'Get packages'
-    run: 'flutter pub get'
-    # Get the Flutter packages.
+        #10 Extract Version
+      - name: Extract version from pubspec.yaml
+        id: extract_version
+        run: |
+          version=$(grep '^version: ' pubspec.yaml | cut -d ' ' -f 2 | tr -d '\r')
+          echo "VERSION=$version" >> $GITHUB_ENV
 
-  - name: 'Build APK'
-    id: 'build'
-    run: 'flutter build ${{ inputs.matrix-target }} && echo "::set-output name=built-apk::build/app/outputs/flutter-apk/"'
-    # Build the APK using the value of the "matrix-target" input.
-    # Use the "id" property to give the step a unique identifier.
-    # Use the "::set-output" command to set the value of the "built-apk" output variable.
+        #11 Check if Tag Exists
+      - name: Check if Tag Exists
+        id: check_tag
+        run: |
+          if git rev-parse "v${{ env.VERSION }}" >/dev/null 2>&1; then
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
 
-  - name: 'Upload APK'
-    uses: 'actions/upload-artifact@v2'
-    with:
-      name: 'Built APK'
-      path: '${{ steps.build.outputs.built-apk }}'
-    # Upload the built APK
+        #12 Modify Tag if it Exists
+      - name: Modify Tag
+        if: env.TAG_EXISTS == 'true'
+        id: modify_tag
+        run: |
+          new_version="${{ env.VERSION }}-build-${{ github.run_number }}"
+          echo "VERSION=$new_version" >> $GITHUB_ENV
+        
+        #13 Create Release
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "build/app/outputs/flutter-apk/app-release.apk,build/app/outputs/bundle/release/app-release.aab,build/ios_build.tar.gz"
+          tag: v${{ env.VERSION }}
+          token: ${{ secrets.TOKEN }}
